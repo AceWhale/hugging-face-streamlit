@@ -9,14 +9,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def get_secret(name):
-    if name in st.secrets:
+    key = os.getenv(name)
+    if key:
+        return key
+    try:
         return st.secrets[name]
-    return os.getenv(name)
+    except Exception:
+        return None
 
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
 HF_TOKEN = get_secret("HF_TOKEN")
 
-def generate_image(prompt):
+def generate_text_to_image(prompt):
     try:
         encoded_prompt = urllib.parse.quote(prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&seed=42"
@@ -31,6 +35,38 @@ def generate_image(prompt):
         return None, "Time-out"
     except Exception as e:
         return None, f"Помилка підключення: {e}"
+
+def upload_image_to_temp(image_bytes):
+    try:
+        files = {"file": ("image.png", image_bytes, "image/png")}
+        response  = requests.post(
+            'https://tmpfiles.org/api/v1/upload',
+            files=files,
+            timeout=15
+        )
+        if response.status_code == 200:
+            data = response.json()
+            url = data['data']['url'].replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+            return url, None
+        else:
+            return None, f"Помилка завантаження на tmpfiles.org ({response.status_code})"
+    except Exception as e:
+        return None, f"Помилка завантаження на tmpfiles.org: {e}"
+
+def generate_image_to_image(image_url, prompt):
+    try:
+        combined_prompt = f"{prompt} --image {image_url}"
+        encoded_prompt = urllib.parse.quote(combined_prompt)
+
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&model=flux&nologo=true"
+        response = requests.get(url, timeout=60)
+
+        if response.status_code == 200:
+            return response.content, None
+        else:
+            return None, f"Помилка генерації зображення ({response.status_code})"
+    except Exception as e:
+        return None, f"Помилка: {e}"
 
 st.title("AI Creative Studio")
 st.write("Напиши яке зображення хочеш отримати - ШІ створить його безкоштовно")
@@ -51,7 +87,7 @@ if st.button("Сгенерувати зображення") and prompt:
     final_prompt = prompt + STYLES[style_choice]
 
     with st.spinner("AI створює зображення"):
-        image_bytes, error = generate_image(final_prompt)
+        image_bytes, error = generate_text_to_image(final_prompt)
 
     if error:
         st.error(f"Не вдалося сгенерувати зображення: {error}")
